@@ -71,6 +71,7 @@ one_letter_code = {
 
 
 def parse_float_or_none(s):
+    """PB: Parses a string into a floating-point number or returns None for missing values"""
     s = s.strip()
     if s in ("", "NA", "NaN", "nan"):
         return None
@@ -78,6 +79,7 @@ def parse_float_or_none(s):
 
 
 def parse_int_or_none(s):
+    """PB: Parses a string into an integer or returns None for missing values"""
     s = s.strip()
     if s in ("", "NA"):
         return None
@@ -233,6 +235,7 @@ def load_contacts_csv(csv_path, residue_offset=0):
                 "ca_offset": ca_offset,
             })
 
+    # PB: Identifies terminal residues for each chain by finding the minimum and maximum residue numbers
     terminal_positions = set()
     for cid, resnums in chain_resnums.items():
         if not resnums:
@@ -242,6 +245,7 @@ def load_contacts_csv(csv_path, residue_offset=0):
         terminal_positions.add((cid, rmin))
         terminal_positions.add((cid, rmax))
 
+    # PB: Evaluates and updates the contact dictionary to retain only the shortest recorded distance for each pair
     for rc in raw_contacts:
         key = (rc["pf"], rc["resnum"], rc["partner_pf"], rc["partner_res"], rc["ctype"])
 
@@ -381,18 +385,21 @@ def compute_projected_positions(residues, residue_keys, flip_x, rot_rad):
 
 
 def get_ca_offset(info):
+    """PB: Retrieves the CA offset value from the contact information dictionary"""
     if info is None:
         return None
     return info.get("ca_offset", None)
 
 
 def zoffset_bucket(co1, co2):
+    """PB: Calculates the rounded integer difference between two CA offset values"""
     if co1 is None or co2 is None:
         return 0
     return int(round(co1 - co2))
 
 
 def compute_zoffset_bucket_intra(info1, info2, flip_sign_struct2):
+    """PB: Computes the rounded Z-offset bucket for intra-protofilament contacts"""
     co1 = get_ca_offset(info1)
     co2 = get_ca_offset(info2)
     if flip_sign_struct2 and co2 is not None:
@@ -401,6 +408,7 @@ def compute_zoffset_bucket_intra(info1, info2, flip_sign_struct2):
 
 
 def compute_zoffset_bucket_inter(info1, info2, flip_sign_struct2, inter_shift):
+    """PB: Computes the rounded Z-offset bucket for inter-protofilament contacts by applying the specified shift"""
     co1 = get_ca_offset(info1)
     co2 = get_ca_offset(info2)
     if flip_sign_struct2 and co2 is not None:
@@ -508,6 +516,7 @@ def write_svg(
     minx1, maxx1, miny1, maxy1 = bounds1
     minx2, maxx2, miny2, maxy2 = bounds2
 
+    # PB: Calculates the bounding boxes and relative coordinate offsets to position the two structures side-by-side
     width1 = 0.0 if minx1 == maxx1 else (maxx1 - minx1)
     height1 = 0.0 if miny1 == maxy1 else (maxy1 - miny1)
     height2 = 0.0 if miny2 == maxy2 else (maxy2 - miny2)
@@ -559,6 +568,7 @@ def write_svg(
     total_width = total_width_world * svg_scale
     total_height = bottom_world * svg_scale
 
+    # PB: Converts 2D world coordinates into scaled SVG canvas pixel coordinates
     def world_to_svg(x, y, off_x, off_y):
         xs = (x + off_x) * svg_scale
         ys = (y + off_y) * svg_scale
@@ -580,6 +590,7 @@ def write_svg(
 
     pf_indices = sorted({pf for (pf, res) in (draw_residues1 | draw_residues2)})
 
+    # PB: Calculates the 3D distance between two CA atoms to determine if a backbone line should be drawn
     def backbone_ca_distance(residues_dict, key1, key2):
         r1 = residues_dict.get(key1)
         r2 = residues_dict.get(key2)
@@ -681,6 +692,7 @@ def write_svg(
                     % (x1, y1, x2, y2)
                 )
 
+        # PB: Determines the appropriate Z-offset bucket for a given contact key
         def common_bucket_for_key(key):
             info1 = contacts1.get(key)
             info2 = contacts2.get(key)
@@ -974,73 +986,20 @@ def write_svg(
     print("SVG file written to:", svg_path)
 
 
-def main():
-    if len(sys.argv) < 3:
-        print(
-            "Usage: python compare.py <contacts1.csv> <contacts2.csv> "
-            "[--offset2 INT] [--flip1] [--rot1 DEG] [--flip2] [--rot2 DEG]"
-        )
-        sys.exit(1)
-
-    csv1 = sys.argv[1]
-    csv2 = sys.argv[2]
-
-    if not os.path.isfile(csv1):
-        print("Error: file not found:", csv1)
-        sys.exit(1)
-    if not os.path.isfile(csv2):
-        print("Error: file not found:", csv2)
-        sys.exit(1)
-
-    flip1 = False
-    flip2 = False
-    rot1_deg = 0.0
-    rot2_deg = 0.0
-    offset2 = 0
-
-    i = 3
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == "--offset2":
-            if i + 1 >= len(sys.argv):
-                print("Error: --offset2 requires an integer value.")
-                sys.exit(1)
-            offset2 = int(sys.argv[i + 1])
-            i += 2
-        elif arg == "--flip1":
-            flip1 = True
-            i += 1
-        elif arg == "--flip2":
-            flip2 = True
-            i += 1
-        elif arg == "--rot1":
-            if i + 1 >= len(sys.argv):
-                print("Error: --rot1 requires a degree value.")
-                sys.exit(1)
-            rot1_deg = float(sys.argv[i + 1])
-            i += 2
-        elif arg == "--rot2":
-            if i + 1 >= len(sys.argv):
-                print("Error: --rot2 requires a degree value.")
-                sys.exit(1)
-            rot2_deg = float(sys.argv[i + 1])
-            i += 2
-        else:
-            print("Unknown option:", arg)
-            print(
-                "Usage: python compare.py <contacts1.csv> <contacts2.csv> "
-                "[--offset2 INT] [--flip1] [--rot1 DEG] [--flip2] [--rot2 DEG]"
-            )
-            sys.exit(1)
+def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False, rot2_deg=0.0, svg_path=None, log_path=None, quiet=False):
+    """PB: Executes a pairwise comparison and returns the average XY and XYZ APD scores."""
 
     root1 = os.path.splitext(csv1)[0]
     root2 = os.path.splitext(csv2)[0]
-    svg_path = "%s_vs_%s.svg" % (root1, root2)
-    log_path = "%s_vs_%s.log" % (root1, root2)
+    if svg_path is None:
+        svg_path = "%s_vs_%s.svg" % (root1, root2)
+    if log_path is None:
+        log_path = "%s_vs_%s.log" % (root1, root2)
 
     orig_stdout = sys.stdout
     log_file = open(log_path, "w")
 
+    # PB: Defines a custom output stream class to simultaneously write output to the console and a log file
     class Tee(object):
         def __init__(self, *streams):
             self.streams = streams
@@ -1053,7 +1012,13 @@ def main():
             for s in self.streams:
                 s.flush()
 
-    sys.stdout = Tee(orig_stdout, log_file)
+    if quiet:
+        sys.stdout = log_file
+    else:
+        sys.stdout = Tee(orig_stdout, log_file)
+
+    all_xy_scores = []
+    all_xyz_scores = []
 
     try:
         print("Loading contacts from:", csv1)
@@ -1070,7 +1035,7 @@ def main():
         print("Common residues:", len(common_residues))
         if not common_residues:
             print("No common residues between the two structures after applying offset2.")
-            return
+            return 100.0, 100.0
 
         print(
             "Classifying contacts with strict_nonterminal=%.2f, strict_terminal=%.2f, relaxed=%.2f"
@@ -1084,6 +1049,7 @@ def main():
         pf_indices = sorted({pf for (pf, r) in common_residues})
 
         # Handedness global flip
+        # PB: Evaluates whether applying a global handedness flip reduces the number of structural mismatches
         apply_handed_flip = False
         if allow_handedness_global_flip:
             direct_mismatches = 0
@@ -1157,6 +1123,7 @@ def main():
         print("Residues with inter-protofilament contact changes:", len(residues_with_inter_contact_change))
 
         # Choose global sign flip of Z-offsets (structure 2) to reduce non-zero deltas overall (intra+inter)
+        # PB: Evaluates whether a global sign flip of Z-offsets minimizes non-zero contact deltas
         apply_zoffset_sign_flip = False
         if allow_zoffset_global_flip:
             count_direct = 0
@@ -1283,6 +1250,9 @@ def main():
             print("  - PF%d Amyloid Packing Difference (XY): %.0f%%" % (pf, adj_frac_xy) )
             print("  - PF%d Amyloid Packing Difference (XYZ): %.0f%%" % (pf, adj_frac_xyz) )
             print("")
+
+            all_xy_scores.append(adj_frac_xy)
+            all_xyz_scores.append(adj_frac_xyz)
 
             # SVG Summary
             pf_stats_lines.append((0, header, True))
@@ -1424,6 +1394,9 @@ def main():
                 print("  " + xyz_line)
                 print("")
 
+                all_xy_scores.append(adj_frac_xy)
+                all_xyz_scores.append(adj_frac_xyz)
+
                 # SVG Summary
                 pf_stats_lines.append((0, header_if, True))
                 pf_stats_lines.append((1, "- residues in left: %d" % a, False))
@@ -1463,10 +1436,65 @@ def main():
 
         print("Done.")
 
+        avg_xy = sum(all_xy_scores) / len(all_xy_scores) if all_xy_scores else 100.0
+        avg_xyz = sum(all_xyz_scores) / len(all_xyz_scores) if all_xyz_scores else 100.0
+        return avg_xy, avg_xyz
+
     finally:
         sys.stdout = orig_stdout
         log_file.close()
-        print("Log file written to:", log_path)
+        if not quiet:
+            print("Log file written to:", log_path)
+
+
+def main():
+    """PB: Parses CLI arguments to execute compare as a standalone script."""
+    if len(sys.argv) < 3:
+        print(
+            "Usage: python compare.py <contacts1.csv> <contacts2.csv> "
+            "[--offset2 INT] [--flip1] [--rot1 DEG] [--flip2] [--rot2 DEG]"
+        )
+        sys.exit(1)
+
+    csv1 = sys.argv[1]
+    csv2 = sys.argv[2]
+
+    if not os.path.isfile(csv1):
+        print("Error: file not found:", csv1)
+        sys.exit(1)
+    if not os.path.isfile(csv2):
+        print("Error: file not found:", csv2)
+        sys.exit(1)
+
+    flip1 = False
+    flip2 = False
+    rot1_deg = 0.0
+    rot2_deg = 0.0
+    offset2 = 0
+
+    i = 3
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == "--offset2":
+            offset2 = int(sys.argv[i + 1])
+            i += 2
+        elif arg == "--flip1":
+            flip1 = True
+            i += 1
+        elif arg == "--flip2":
+            flip2 = True
+            i += 1
+        elif arg == "--rot1":
+            rot1_deg = float(sys.argv[i + 1])
+            i += 2
+        elif arg == "--rot2":
+            rot2_deg = float(sys.argv[i + 1])
+            i += 2
+        else:
+            print("Unknown option:", arg)
+            sys.exit(1)
+
+    run_comparison(csv1, csv2, offset2, flip1, rot1_deg, flip2, rot2_deg)
 
 
 if __name__ == "__main__":
