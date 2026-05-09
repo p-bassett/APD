@@ -4,16 +4,25 @@
 
 import os
 import sys
+
+# Prevents Python from generating __pycache__ directories when importing modules
+sys.dont_write_bytecode = True
 import shutil
 import itertools
 import csv
-import contextlib
-import io
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+# Dynamically appends the APD script directory to the system path across all OS process spawn methods
+base_dir = Path.cwd()
+apd_dir = base_dir / "APD"
+if apd_dir.exists() and (apd_dir / "compare.py").exists():
+    sys.path.insert(0, str(apd_dir))
+else:
+    sys.path.insert(0, str(base_dir))
+
 def process_pair(pair, logs_dir, figs_dir):
-    """Executes a single pairwise comparison natively returning the APD scores."""
+    """Executes a single pairwise comparison natively returning the APD scores"""
     file1, file2 = pair
     base1 = file1.stem.replace("_contacts", "")
     base2 = file2.stem.replace("_contacts", "")
@@ -22,33 +31,21 @@ def process_pair(pair, logs_dir, figs_dir):
     svg_path = figs_dir / f"{base1}_vs_{base2}.svg"
     
     try:
-        # Imports compare here to ensure process pool workers have independent access
         import compare
         avg_xy, avg_xyz = compare.run_comparison(str(file1), str(file2), svg_path=str(svg_path), log_path=str(log_path), quiet=True)
         return base1, base2, True, avg_xy, avg_xyz
     except Exception as e:
-        print(f"  -> [!] Comparison failed internally: {file1.name} vs {file2.name} - {e}")
         return base1, base2, False, 100.0, 100.0
 
 def main():
-    """Executes the full batch APD workflow."""
+    """Executes the full batch APD workflow"""
     # Sets up base directories and paths for inputs and outputs
-    base_dir = Path.cwd()
     input_dir = base_dir / "PDBs"
     contacts_dir = base_dir / "Contacts"
     comparisons_dir = base_dir / "Comparisons"
     logs_dir = comparisons_dir / "Logs"
     figs_dir = comparisons_dir / "Figures"
     
-    # Dynamically appends the APD script directory to the system path for direct importing
-    apd_dir = base_dir / "APD"
-    if apd_dir.exists() and (apd_dir / "compare.py").exists():
-        sys.path.insert(0, str(apd_dir))
-        contacts_script = apd_dir / "contacts.py"
-    else:
-        sys.path.insert(0, str(base_dir))
-        contacts_script = base_dir / "contacts.py"
-        
     try:
         import compare
     except ImportError:
@@ -69,57 +66,50 @@ def main():
         structure_files.extend(input_dir.glob(ext))
 
     if not structure_files:
-        print(f"No structure files found in '{input_dir}'. Please add PDB/CIF files and run again.")
+        print(f"  -> [!] No structure files found in '{input_dir}'. Please add PDB/CIF files and run again.")
     else:
-        print(f"Found {len(structure_files)} structures to process in '{input_dir}'.\n")
+        print(f"  -> Found {len(structure_files)} structures to process in '{input_dir}'\n")
         
-        import runpy
+        import contacts
         for struct_file in structure_files:
             print(f"Processing: {struct_file.name}...")
             
             try:
-                # Modifies sys.argv dynamically to satisfy contacts.py without altering its source code
-                original_argv = sys.argv
-                sys.argv = ["contacts.py", str(struct_file)]
+                base_name = struct_file.stem
+                expected_csv = contacts_dir / f"{base_name}_contacts.csv"
+                expected_bild = contacts_dir / f"{base_name}_contacts.bild"
                 
-                # Silences the console output of contacts.py during batch processing
-                with contextlib.redirect_stdout(io.StringIO()):
-                    runpy.run_path(str(contacts_script), run_name="__main__")
-                sys.argv = original_argv
+                # Evaluates intelligent caching to skip extraction if output files already exist and are current
+                if expected_csv.exists() and expected_bild.exists():
+                    in_mtime = struct_file.stat().st_mtime
+                    if expected_csv.stat().st_mtime > in_mtime and expected_bild.stat().st_mtime > in_mtime:
+                        print(f"  -> Skipping: Contacts already up-to-date in '{contacts_dir.name}/'")
+                        continue
+
+                # Executes the modularized contact extraction natively
+                contacts.extract_contacts(str(struct_file), csv_file=str(expected_csv), bild_file=str(expected_bild), quiet=True)
+                print(f"  -> Successfully extracted contacts to '{contacts_dir.name}/'")
             except Exception as e:
-                sys.argv = original_argv
                 print(f"  -> [!] Failed to process {struct_file.name}")
                 print(f"  -> Error details: {e}")
                 continue
 
-            base_name = struct_file.stem
-            expected_csv = struct_file.parent / f"{base_name}_contacts.csv"
-            expected_bild = struct_file.parent / f"{base_name}_contacts.bild"
-
-            # Relocates the extracted contacts and bild files to the centralized contacts directory
-            for out_file in (expected_csv, expected_bild):
-                if out_file.exists():
-                    dest_file = contacts_dir / out_file.name
-                    shutil.move(str(out_file), str(dest_file))
-                    
-            print(f"  -> Successfully extracted contacts to '{contacts_dir.name}/'")
-
     # Performs all-vs-all pairwise comparisons of contacts
     print("\n\nPerforming pairwise comparisons of all structure contact lists in Contacts/...\n")
-    csv_files = sorted(list(contacts_dir.glob("*_contacts.csv")))
+    csv_files = sorted(contacts_dir.glob("*_contacts.csv"))
     if len(csv_files) < 2:
-        print("Not enough contact CSVs in 'Contacts' to perform pairwise comparisons. Exiting.")
+        print("  -> [!] Not enough contact CSVs in 'Contacts' to perform pairwise comparisons")
         return
 
     # Generates all unique combinatorial pairs for the pairwise comparisons
     pairs = list(itertools.combinations(csv_files, 2))
-    print(f"Found {len(csv_files)} structure CSVs. Generating {len(pairs)} pairwise comparisons...")
+    print(f"  -> Found {len(csv_files)} structure CSVs. Generating {len(pairs)} pairwise comparisons")
 
     log_files = []
     # Determines the number of available CPU cores to allocate for parallel processing
     cpu_cores = os.cpu_count() or 4
     workers = max(1, cpu_cores - 1)
-    print(f"Using {workers} CPU cores for parallel processing...\n")
+    print(f"  -> Using {workers} CPU cores for parallel processing\n")
     
     # Distributes pairwise comparisons across the process pool
     with ProcessPoolExecutor(max_workers=workers) as executor:
@@ -133,6 +123,8 @@ def main():
             base1, base2, success, avg_xy, avg_xyz = future.result()
             if success:
                 log_files.append((base1, base2, avg_xy, avg_xyz))
+            else:
+                print(f"  -> [!] Comparison failed internally: {base1} vs {base2}")
             
             if i % 10 == 0 or i == len(pairs):
                 print(f"  -> Progress: {i}/{len(pairs)} comparisons completed")
@@ -140,7 +132,7 @@ def main():
     # Parses logs and generates the distance matrices
     print("\n\nWriting APD difference matrices to CSV files...\n")
     # Extracts unique structure names by removing the contacts suffix
-    structure_names = sorted(list({f.stem.replace("_contacts", "") for f in csv_files}))
+    structure_names = sorted({f.stem.replace("_contacts", "") for f in csv_files})
     
     # Initializes symmetric matrices with zeros on the diagonal
     matrix_xy = {s1: {s2: 0.0 for s2 in structure_names} for s1 in structure_names}
