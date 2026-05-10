@@ -49,7 +49,7 @@ def main():
     try:
         import compare
     except ImportError:
-        print("Error: Could not import compare.py. Ensure it is located in the root or APD directory.")
+        print("  -> [!] Error: Could not import compare.py; ensure it is located in the root or APD directory")
         return
 
     # Ensures all required directories exist before processing begins
@@ -66,7 +66,7 @@ def main():
         structure_files.extend(input_dir.glob(ext))
 
     if not structure_files:
-        print(f"  -> [!] No structure files found in '{input_dir}'. Please add PDB/CIF files and run again.")
+        print(f"  -> [!] No structure files found in '{input_dir}'; please add PDB/CIF files and run again")
     else:
         print(f"  -> Found {len(structure_files)} structures to process in '{input_dir}'\n")
         
@@ -103,7 +103,7 @@ def main():
 
     # Generates all unique combinatorial pairs for the pairwise comparisons
     pairs = list(itertools.combinations(csv_files, 2))
-    print(f"  -> Found {len(csv_files)} structure CSVs. Generating {len(pairs)} pairwise comparisons")
+    print(f"  -> Found {len(csv_files)} structure CSVs; generating {len(pairs)} pairwise comparisons")
 
     log_files = []
     # Determines the number of available CPU cores to allocate for parallel processing

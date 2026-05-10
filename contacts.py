@@ -93,36 +93,28 @@ from Bio.PDB import PDBParser, MMCIFParser, NeighborSearch, is_aa
 #   <root>_contacts.bild
 #
 
-# Parameters
-
-# Side-chain contact cutoff (Angstrom), used as relaxed threshold in compare.py
+# Defines the side-chain contact cutoff in Angstroms, used as a relaxed threshold in compare.py
 sidechain_cutoff = 6.5
 
-# Minimum sequence separation (in axial index units) for
-# intra-protofilament contacts. Residues whose axial indices
-# differ by less than this value in the same protofilament are
-# excluded from intra-protofilament contacts.
+# Sets the minimum sequence separation in axial index units for intra-protofilament contacts
 min_sequence_separation = 3
 
-# Parameters for protofilament detection based on CA-CA stacking
+# Defines parameters for protofilament detection based on CA-CA stacking
 stacking_ca_cutoff = 5.5
 min_overlap_residues = 5
 min_stack_fraction = 0.8
 
-# BILD cylinder radius for contacts
+# Sets the BILD cylinder radius for contact visualization
 cylinder_radius = 0.4
 
-# Tolerance used in the "outer side" test. If the dot product involved
-# in classifying "side of plane" has absolute value below this, we treat
-# it as ambiguous and do not reject the contact on that basis.
+# Sets the tolerance used in the outer side test to handle ambiguous cases
 outer_side_eps = 1.0e-3
 
-# Maximum CA-CA distance to allow treating non-consecutive residue
-# numbering as if it were consecutive for the sequence index.
-max_backbone_gap_distance = 4.2  # Angstrom
+# Sets the maximum CA-CA distance to allow treating non-consecutive residue numbering as consecutive
+max_backbone_gap_distance = 4.2
 
 def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
-    """PB: Extracts side-chain contacts from a structural file and exports them to CSV and BILD formats"""
+    """Extracts side-chain contacts from a structural file and exports them to CSV and BILD formats"""
     if not os.path.isfile(infile):
         raise FileNotFoundError(f"Error: file not found: {infile}")
 
@@ -138,7 +130,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         sys.stdout = open(os.devnull, "w")
 
     try:
-        # 1) Parse structure
+        # Parses the input structure file
         
         ext = os.path.splitext(infile)[1].lower()
         if ext in [".cif", ".mmcif"]:
@@ -148,11 +140,11 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         structure = parser.get_structure("prot", infile)
         
-        # 2) Work on first model
+        # Extracts the first model from the parsed structure
         
         model = next(structure.get_models())
         
-        # 3) Collect chains and CA atoms for protofilament detection
+        # Collects chains and CA atoms for protofilament detection
         
         protein_chains = []
         ca_maps = {}  # chain_id -> {resnum: CA atom}
@@ -179,6 +171,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         
         def chain_center(cid):
+            """Calculates the 3D geometric center of a specified chain using its CA atom coordinates"""
             xs, ys, zs = [], [], []
             for r, atom in ca_maps[cid].items():
                 xs.append(float(atom.coord[0]))
@@ -189,11 +182,12 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         
         def ca_distance(a1, a2):
+            """Computes the Euclidean distance between two atoms"""
             dv = a1.coord - a2.coord
             return math.sqrt(float(dv[0] ** 2 + dv[1] ** 2 + dv[2] ** 2))
         
         
-        # 4) Build graph of stacked chains using CA-CA distances
+        # Builds an adjacency graph of stacked chains using CA-CA distances
         
         from collections import defaultdict as _dd
         
@@ -221,9 +215,10 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                     stack_graph[c1].add(c2)
                     stack_graph[c2].add(c1)
         
-        # 5) Identify protofilaments and order chains
+        # Identifies protofilaments and sequentially orders their chains
         
         def bfs(start):
+            """Performs a breadth-first search to traverse and return all nodes in a connected component"""
             visited = set([start])
             q = deque([start])
             while q:
@@ -234,7 +229,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                         q.append(v)
             return visited
         
-        # Ensure all chains appear in stack_graph
+        # Ensures all chains appear in the stack graph
         for cid in chain_ids:
             if cid not in stack_graph:
                 stack_graph[cid] = set()
@@ -268,7 +263,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
             protofilaments.append(ordered)
         
-        # 6) Align protofilaments to same direction
+        # Aligns protofilaments to a consistent direction
         
         ref_axis = None
         
@@ -298,7 +293,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 if dot < 0:
                     protofilaments[k] = list(reversed(pf))
         
-        # 7) Assign chain offsets (middle = 0) and identify middle chains
+        # Assigns chain offsets relative to the middle chain of each protofilament
         
         chain_to_pf = {}
         chain_offset = {}
@@ -312,7 +307,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
             if pf:
                 pf_to_middle_chain_id[pf_index] = pf[mid]
         
-        # Check that each protofilament has at least two amyloid layers
+        # Verifies that each protofilament has at least two amyloid layers
         for pf_index, pf in enumerate(protofilaments):
             if len(pf) < 2:
                 raise RuntimeError(
@@ -333,7 +328,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
             print("PF", idx, ":", s)
         print()
         
-        # Check that stacking is approximately along the Z axis.
+        # Verifies that stacking is approximately aligned with the Z-axis
         print("Checking that protofilaments are approximately aligned with Z:")
         for pf_index, pf in enumerate(protofilaments):
             if not pf:
@@ -343,7 +338,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 continue
         
             neighbor_cid = None
-            # Prefer offset +1 over -1
+            # Prefers an offset of +1 over -1 for neighbor selection
             for cid in pf:
                 if chain_offset.get(cid) == 1:
                     neighbor_cid = cid
@@ -383,7 +378,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 )
         print()
         
-        # 8) Build residue lists, contact atoms, CA and CB positions
+        # Builds residue lists, contact atoms, and CA/CB positions
         
         protein_residues = []
         chain_residues = defaultdict(list)
@@ -403,11 +398,13 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         
         def atom_distance(a, b):
+            """Calculates the Euclidean distance between the coordinates of two atoms"""
             dv = a.coord - b.coord
             return math.sqrt(float(dv[0] ** 2 + dv[1] ** 2 + dv[2] ** 2))
         
         
         def get_ca_atom(res):
+            """Retrieves the CA atom from a residue or safely returns None if it is missing"""
             try:
                 return res["CA"]
             except KeyError:
@@ -446,11 +443,11 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 for a in res:
                     aname = a.get_name().strip()
         
-                    # Ignore hydrogens (any atom whose name starts with H)
+                    # Ignores hydrogen atoms
                     if aname.startswith("H"):
                         continue
         
-                    # Ignore backbone atoms, except allow CA of GLY
+                    # Ignores backbone atoms, excepting the CA atom of glycine residues
                     if aname in mainchain_names:
                         if not (resname_upper == "GLY" and aname == "CA"):
                             continue
@@ -461,7 +458,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         if not sidechain_atoms_all:
             raise RuntimeError("No sidechain heavy atoms found for contact detection.")
         
-        # Build mapping of residue numbers in middle chains for each protofilament.
+        # Builds a mapping of residue numbers in middle chains for each protofilament
         pf_mid_resnums = {}
         for pf_index, pf in enumerate(protofilaments):
             mid_cid = pf_to_middle_chain_id.get(pf_index, None)
@@ -469,9 +466,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 continue
             pf_mid_resnums[pf_index] = set(res.id[1] for res in chain_residues[mid_cid])
         
-        # Estimate the helical rise per protofilament as the average Z-distance between CA atoms
-        # between identical residues in layers 0 and 1 (middle chain
-        # offset 0 and chain offset +1 if present, otherwise -1).
+        # Estimates the helical rise per protofilament from the average CA Z-distances between layers 0 and 1
         pf_rise = {}
         print("Estimating helical rise from CA Z-distances between layers 0 and 1:")
         for pf_index, pf in enumerate(protofilaments):
@@ -481,7 +476,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
             if mid_cid is None:
                 continue
         
-            # Choose layer 1 chain: prefer offset +1, otherwise -1
+            # Selects the layer 1 chain preferring an offset of +1 over -1
             layer1_cid = None
             for cid in pf:
                 if chain_offset.get(cid) == 1:
@@ -532,7 +527,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
             )
         print()
         
-        # 8a) Sequence index per residue (per chain, PDB order)
+        # Computes the sequence index per residue in PDB order
         
         res_chain_seq_index = {}
         
@@ -556,7 +551,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                         if ca_prev is not None and ca_curr is not None:
                             d_ca = ca_distance(ca_prev, ca_curr)
                             if d_ca < max_backbone_gap_distance:
-                                # Treat as consecutive despite numbering jump
+                                # Treats residues as consecutive despite numbering jumps
                                 jump = 1
         
                     seq_index = prev_seq_index + jump
@@ -565,7 +560,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 prev_res = res
                 prev_seq_index = seq_index
         
-        # 8b) Vector utilities
+        # Defines 3D vector mathematical utility functions
         
         def vec_sub(a, b):
             return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
@@ -586,7 +581,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         def vec_norm(a):
             return math.sqrt(vec_dot(a, a))
         
-        # 8c) Axial index per residue (per protofilament)
+        # Calculates the axial index per residue for each protofilament
         
         chain_axial_offset = {}
         res_axial_index = {}
@@ -652,7 +647,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                     if seq_idx is not None:
                         res_axial_index[res] = seq_idx + offset
         
-        # 8d) Outer-side planes
+        # Computes the outer-side reference planes for each residue
         
         def choose_neighbor_chain_for_plane(pf_chain_ids, cid):
             off_self = chain_offset[cid]
@@ -722,7 +717,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 continue
             compute_outer_side_planes_for_pf(pf)
         
-        # 8e) Handedness
+        # Determines the handedness orientation of side chains
         
         def compute_handedness_for_middle_chain(pf_chain_ids):
             eps = 1.0e-6
@@ -865,7 +860,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
                 continue
             compute_handedness_for_middle_chain(pf)
         
-        # 8f) Outer-side segment filter
+        # Applies the outer-side segment filter to validate contacts
         
         def sidechain_vector(res):
             rn = res.get_resname().upper()
@@ -940,20 +935,10 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
             return True
         
-        # 8g) Real-valued ca_offset (fractional number of rises, middle-layer reference)
+        # Computes the real-valued CA offset representing the fractional number of rises
         
         def compute_ca_offset_for_pair(pf_src, resnum_src, pf_partner, resnum_partner):
-            """
-            Compute ca_offset for a contact between residue1 (pf_src, resnum_src)
-            and residue2 (pf_partner, resnum_partner) as a fractional number of rises,
-            based on the vertical separation between their middle-layer CA atoms.
-        
-            ca_offset = (z_mid_partner(residue2) - z_mid_src(residue1)) / rise
-        
-            The rise used is the average of the available per-protofilament rises
-            for pf_src and pf_partner (if only one is defined and positive, that
-            value is used).
-            """
+            """Computes the CA offset for a contact between two residues as a fractional number of rises"""
             rise_src = pf_rise.get(pf_src, None)
             rise_partner = pf_rise.get(pf_partner, None)
         
@@ -1002,7 +987,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
             return offset_float
         
-        # 9) Collect contacts
+        # Collects and validates side-chain contacts
         
         contacts = {}
         
@@ -1103,7 +1088,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         print("Total contact pairs (after outer-side segment filter):", len(contacts))
         
-        # 10) Write contacts.csv
+        # Writes the extracted contacts and properties to a CSV file
         
         with open(csv_file, "w") as fout:
             fout.write(
@@ -1229,7 +1214,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         
         print("CSV file written to:", csv_file)
         
-        # 11) Write BILD file with all contacts
+        # Generates a BILD file for 3D visualization of contacts
         
         with open(bild_file, "w") as f:
             for (pf_src, resnum_src, pf_partner, resnum_partner, ctype), info in contacts.items():
@@ -1263,7 +1248,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
 
 
 def main():
-    """PB: Parses CLI arguments to execute contact extraction as a standalone script"""
+    """Parses CLI arguments to execute contact extraction as a standalone script"""
     if len(sys.argv) != 2:
         print("Usage: python contacts.py <input.pdb|input.cif>")
         sys.exit(1)

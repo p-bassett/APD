@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# Compares amyloid protofilament contacts between two structural models
+# Calculates the Amyloid Packing Difference (APD) and generates an SVG schematic
 
 import sys
 import os
@@ -37,28 +39,27 @@ from collections import defaultdict
 #         using the best inter shift; XY and XYZ distances are reported.
 #
 
-# Distance thresholds (Angstrom)
+# Defines distance thresholds in Angstroms
 strict_cutoff_nonterminal = 4.5
 strict_cutoff_terminal = 3.5
 relaxed_cutoff = 6.5
 
-# Backbone CA-CA maximum distance to draw black lines
+# Sets the maximum backbone CA-CA distance for drawing connection lines
 max_backbone_ca_distance = 4.2
 
-# SVG parameters
+# Defines SVG scaling and layout parameters
 svg_scale = 10.0
 svg_margin = 5.0
 svg_panel_spacing = 10.0
-svg_circle_radius = 1.2  # in Angstrom, then scaled
+svg_circle_radius = 1.2
 
-# Allow global flip of handedness in structure 2
+# Allows global flip of handedness in the second structure to minimize mismatches
 allow_handedness_global_flip = True
 
-# Allow global sign flip of Z-offsets (ca_offset) in structure 2 (up-side-down check)
+# Allows global sign flip of Z-offsets in the second structure to test for inverted orientations
 allow_zoffset_global_flip = True
 
-# Allow global integer shift of inter-protofilament Z-offsets for structure 2
-# Tested shifts are in inter_zoffset_shift_candidates.
+# Allows a global integer shift of inter-protofilament Z-offsets for the second structure
 allow_inter_zoffset_global_shift = True
 inter_zoffset_shift_candidates = [-2, -1, 0, 1, 2]
 
@@ -71,7 +72,7 @@ one_letter_code = {
 
 
 def parse_float_or_none(s):
-    """PB: Parses a string into a floating-point number or returns None for missing values"""
+    """Parses a string into a floating-point number or returns None for missing values"""
     s = s.strip()
     if s in ("", "NA", "NaN", "nan"):
         return None
@@ -79,7 +80,7 @@ def parse_float_or_none(s):
 
 
 def parse_int_or_none(s):
-    """PB: Parses a string into an integer or returns None for missing values"""
+    """Parses a string into an integer or returns None for missing values"""
     s = s.strip()
     if s in ("", "NA"):
         return None
@@ -87,7 +88,7 @@ def parse_int_or_none(s):
 
 
 def normalize_handed_label(h):
-    """Normalize handedness labels; treat blank/NA-like values as missing."""
+    """Normalizes handedness labels and treats blank or NA-like values as missing"""
     h = str(h).strip()
     if h.upper() in ("", "NA", "N/A", "NONE", "NULL"):
         return None
@@ -95,7 +96,7 @@ def normalize_handed_label(h):
 
 
 def flip_handed_label(h):
-    """Flip handedness label for global comparison."""
+    """Flips the handedness label for global comparison"""
     h = normalize_handed_label(h)
     if h == "R":
         return "L"
@@ -109,28 +110,7 @@ def flip_handed_label(h):
 
 
 def load_contacts_csv(csv_path, residue_offset=0):
-    """Load residues and contacts from a contacts.py CSV file.
-
-    residue_offset:
-      Integer offset applied to ALL residue numbers in this file:
-        new_resnum      = resnum_raw + residue_offset
-        new_partner_res = partner_res_raw + residue_offset
-
-    Returns:
-      residues: dict[(pf, residue)] -> {
-          "resname": str,
-          "handed": str,
-          "ca": (x, y, z) or None,
-          "cb": (x, y, z) or None,
-          "chain_id": str,
-      }
-
-      contacts: dict[(pf, res, partner_pf, partner_res, ctype)] -> {
-          "distance": float,
-          "terminal": bool,
-          "ca_offset": float or None,
-      }
-    """
+    """Loads residues and contacts from a generated CSV file with an optional sequence offset"""
     residues = {}
     contacts = {}
     chain_resnums = defaultdict(set)
@@ -235,7 +215,7 @@ def load_contacts_csv(csv_path, residue_offset=0):
                 "ca_offset": ca_offset,
             })
 
-    # PB: Identifies terminal residues for each chain by finding the minimum and maximum residue numbers
+    # Identifies terminal residues for each chain by finding the minimum and maximum residue numbers
     terminal_positions = set()
     for cid, resnums in chain_resnums.items():
         if not resnums:
@@ -245,7 +225,7 @@ def load_contacts_csv(csv_path, residue_offset=0):
         terminal_positions.add((cid, rmin))
         terminal_positions.add((cid, rmax))
 
-    # PB: Evaluates and updates the contact dictionary to retain only the shortest recorded distance for each pair
+    # Evaluates and updates the contact dictionary to retain only the shortest recorded distance for each pair
     for rc in raw_contacts:
         key = (rc["pf"], rc["resnum"], rc["partner_pf"], rc["partner_res"], rc["ctype"])
 
@@ -276,7 +256,7 @@ def load_contacts_csv(csv_path, residue_offset=0):
 
 
 def classify_contacts(contacts1, contacts2):
-    """Classify contacts into common and unique sets."""
+    """Classifies contacts into common and unique sets based on strict and relaxed distance thresholds"""
     keys1 = set(contacts1.keys())
     keys2 = set(contacts2.keys())
     all_keys = keys1 | keys2
@@ -285,21 +265,8 @@ def classify_contacts(contacts1, contacts2):
     unique1_keys = set()
     unique2_keys = set()
 
-    # IMPORTANT (inter-/intra-PF consistency):
-    # The project definition for contact classification uses a single strict
-    # threshold (4.5 Å) and a relaxed threshold (6.5 Å):
-    #   * Common: strict in one structure AND relaxed in the other.
-    #   * Unique: strict in one structure AND absent even at relaxed in the other.
-    # This must apply identically for intra- and inter-protofilament contacts.
-    #
-    # Previous versions used a special "terminal" strict cutoff (3.5 Å) and
-    # additionally *excluded* terminal contacts from the unique sets. In the CSVs
-    # from contacts.py, "terminal" is only inferred from the min/max residue
-    # numbers that appear in the contact table, which can incorrectly label
-    # internal residues (often glycines) as terminal when only a contact subset
-    # is present. That caused missing inter-PF contacts involving glycines.
-    #
-    # We therefore ignore the inferred terminal flag for classification.
+    # Applies contact classification using strict and relaxed distance thresholds
+    # Ignores the inferred terminal flag to prevent misclassifying internal residues
     def get_info(info):
         if info is None:
             return None, False, False
@@ -330,7 +297,7 @@ def classify_contacts(contacts1, contacts2):
 
 
 def project_point(point3d, flip_x, rot_rad):
-    """Project 3D point (x, y, z) to 2D (x, y) with optional flip and rotation."""
+    """Projects a 3D coordinate point to a 2D plane with optional flipping and rotation"""
     x, y, z = point3d
     if flip_x:
         x = -x
@@ -342,7 +309,7 @@ def project_point(point3d, flip_x, rot_rad):
 
 
 def compute_projected_positions(residues, residue_keys, flip_x, rot_rad):
-    """Compute projected CA and CB positions for a given set of residues (keys are (pf,res))."""
+    """Computes projected 2D CA and CB positions for a given set of residues"""
     ca_proj = {}
     cb_proj = {}
 
@@ -385,21 +352,21 @@ def compute_projected_positions(residues, residue_keys, flip_x, rot_rad):
 
 
 def get_ca_offset(info):
-    """PB: Retrieves the CA offset value from the contact information dictionary"""
+    """Retrieves the CA offset value from the contact information dictionary"""
     if info is None:
         return None
     return info.get("ca_offset", None)
 
 
 def zoffset_bucket(co1, co2):
-    """PB: Calculates the rounded integer difference between two CA offset values"""
+    """Calculates the rounded integer difference between two CA offset values"""
     if co1 is None or co2 is None:
         return 0
     return int(round(co1 - co2))
 
 
 def compute_zoffset_bucket_intra(info1, info2, flip_sign_struct2):
-    """PB: Computes the rounded Z-offset bucket for intra-protofilament contacts"""
+    """Computes the rounded Z-offset bucket for intra-protofilament contacts"""
     co1 = get_ca_offset(info1)
     co2 = get_ca_offset(info2)
     if flip_sign_struct2 and co2 is not None:
@@ -408,7 +375,7 @@ def compute_zoffset_bucket_intra(info1, info2, flip_sign_struct2):
 
 
 def compute_zoffset_bucket_inter(info1, info2, flip_sign_struct2, inter_shift):
-    """PB: Computes the rounded Z-offset bucket for inter-protofilament contacts by applying the specified shift"""
+    """Computes the rounded Z-offset bucket for inter-protofilament contacts by applying the specified shift"""
     co1 = get_ca_offset(info1)
     co2 = get_ca_offset(info2)
     if flip_sign_struct2 and co2 is not None:
@@ -419,13 +386,7 @@ def compute_zoffset_bucket_inter(info1, info2, flip_sign_struct2, inter_shift):
 
 
 def choose_best_inter_shift(common_keys, contacts1, contacts2, flip_sign_struct2, candidates):
-    """Choose inter_shift minimizing the number of common inter contacts with non-zero rounded delta.
-
-    Tie-break:
-      1) prefer shift == 0
-      2) then prefer smallest abs(shift)
-      3) then prefer negative (stable deterministic)
-    """
+    """Chooses the inter-protofilament shift that minimizes the number of common contacts with non-zero rounded deltas"""
     counts = []
     for sh in candidates:
         nonzero = 0
@@ -480,7 +441,7 @@ def write_svg(
     inter_zoffset_shift,
     pf_stats_lines,
 ):
-    """Write SVG with two panels (structure 1 and 2), legend, and stats."""
+    """Generates and writes a detailed SVG schematic comparing the two structures with corresponding statistics"""
     rot1_rad = math.radians(rot1_deg)
     rot2_rad = math.radians(rot2_deg)
 
@@ -516,7 +477,7 @@ def write_svg(
     minx1, maxx1, miny1, maxy1 = bounds1
     minx2, maxx2, miny2, maxy2 = bounds2
 
-    # PB: Calculates the bounding boxes and relative coordinate offsets to position the two structures side-by-side
+    # Calculates the bounding boxes and relative coordinate offsets to position the two structures side-by-side
     width1 = 0.0 if minx1 == maxx1 else (maxx1 - minx1)
     height1 = 0.0 if miny1 == maxy1 else (maxy1 - miny1)
     height2 = 0.0 if miny2 == maxy2 else (maxy2 - miny2)
@@ -545,7 +506,7 @@ def write_svg(
     label_y_world = structures_bottom_world + svg_margin * 0.5
     legend_y_world = label_y_world + svg_margin * 1.0
 
-    # Estimate space for legend + summary
+    # Estimates space required for the legend and summary
     legend_start_world = legend_y_world
     y_world = legend_start_world + 3.0 * row_step_world
     y_world += 1.2 * row_step_world
@@ -568,7 +529,7 @@ def write_svg(
     total_width = total_width_world * svg_scale
     total_height = bottom_world * svg_scale
 
-    # PB: Converts 2D world coordinates into scaled SVG canvas pixel coordinates
+    # Converts 2D world coordinates into scaled SVG canvas pixel coordinates
     def world_to_svg(x, y, off_x, off_y):
         xs = (x + off_x) * svg_scale
         ys = (y + off_y) * svg_scale
@@ -590,7 +551,7 @@ def write_svg(
 
     pf_indices = sorted({pf for (pf, res) in (draw_residues1 | draw_residues2)})
 
-    # PB: Calculates the 3D distance between two CA atoms to determine if a backbone line should be drawn
+    # Calculates the 3D distance between two CA atoms to determine if a backbone line should be drawn
     def backbone_ca_distance(residues_dict, key1, key2):
         r1 = residues_dict.get(key1)
         r2 = residues_dict.get(key2)
@@ -635,7 +596,7 @@ def write_svg(
                     last = keyr
 
         def draw_unique(unique_keys, circ_svg):
-            """Draw unique contacts that involve only common residues (legacy behavior)."""
+            """Draws unique contacts that involve only common residues"""
             for key in sorted(unique_keys):
                 pf, res, partner_pf, partner_res, ctype = key
                 k1 = (pf, res)
@@ -661,7 +622,7 @@ def write_svg(
                 )
 
         def draw_unique_residue_contacts(residues_unique_set, contacts_dict, circ_svg):
-            """Draw strict contacts that involve at least one residue unique to this structure."""
+            """Draws strict contacts that involve at least one residue unique to this structure"""
             for key, info in contacts_dict.items():
                 pf, res, partner_pf, partner_res, ctype = key
                 k1 = (pf, res)
@@ -670,8 +631,7 @@ def write_svg(
                 if k1 not in residues_unique_set and k2 not in residues_unique_set:
                     continue
 
-                # Only draw strict contacts. Use the same strict definition as
-                # classify_contacts() (4.5 Å), ignoring the inferred terminal flag.
+                # Evaluates strict contacts using the same definition as the classification step
                 if info is None:
                     continue
                 d = info.get("distance", None)
@@ -692,7 +652,7 @@ def write_svg(
                     % (x1, y1, x2, y2)
                 )
 
-        # PB: Determines the appropriate Z-offset bucket for a given contact key
+        # Determines the appropriate Z-offset bucket for a given contact key
         def common_bucket_for_key(key):
             info1 = contacts1.get(key)
             info2 = contacts2.get(key)
@@ -702,6 +662,7 @@ def write_svg(
             return compute_zoffset_bucket_intra(info1, info2, flip_zoffset_sign_struct2)
 
         def draw_common(circ_svg):
+            """Draws lines for contacts that are common to both structures and colors them by Z-offset difference"""
             for key in sorted(common_keys):
                 pf, res, partner_pf, partner_res, ctype = key
                 k1 = (pf, res)
@@ -732,6 +693,7 @@ def write_svg(
                 )
 
         def draw_residues(residues, circ_svg, residue_keys, unique_residue_set):
+            """Draws residue circles colored by mutation or handedness changes and adds their text labels"""
             for keyr in sorted(residue_keys):
                 if keyr not in circ_svg:
                     continue
@@ -747,7 +709,7 @@ def write_svg(
                 is_handed_flip = keyr in handed_diff_residues
 
                 if is_unique:
-                    # Unique residues: white fill, grey outline, grey label
+                    # Configures unique residues with white fill, grey outline, and grey label
                     fill_color = "white"
                     text_color = "#D3D3D3"
                 else:
@@ -790,7 +752,7 @@ def write_svg(
                     % (x, label_y, text_color, letter)
                 )
 
-        # Structure 1
+        # Groups and renders components for the first structure
         f.write('<g id="structure1">\n')
         draw_backbone(residues1, ca1_svg, draw_residues1, unique_residues1)
         draw_common(circ1_svg)
@@ -799,7 +761,7 @@ def write_svg(
         draw_residues(residues1, circ1_svg, draw_residues1, unique_residues1)
         f.write('</g>\n')
 
-        # Structure 2
+        # Groups and renders components for the second structure
         f.write('<g id="structure2">\n')
         draw_backbone(residues2, ca2_svg, draw_residues2, unique_residues2)
         draw_common(circ2_svg)
@@ -808,7 +770,7 @@ def write_svg(
         draw_residues(residues2, circ2_svg, draw_residues2, unique_residues2)
         f.write('</g>\n')
 
-        # Structure labels
+        # Renders structure labels
         center1_x_world = (minx1 + maxx1) / 2.0 + offset1_x
         center2_x_world = (minx2 + maxx2) / 2.0 + offset2_x
         center1_x = center1_x_world * svg_scale
@@ -830,7 +792,7 @@ def write_svg(
         )
         f.write('</g>\n')
 
-        # Legend (slightly larger font)
+        # Renders the legend with a slightly larger font
         legend_x = svg_margin * svg_scale
         legend_y = legend_y_world * svg_scale
         legend_text_offset = circle_r_px * 3.0
@@ -898,7 +860,7 @@ def write_svg(
         legend_line_row("#1C284E", 6.0, "common contact (Z-offset>=3)")
         f.write("</g>\n")
 
-        # Summary with aligned value column using tspans and dynamic value column
+        # Renders the summary section with aligned value columns using text spans
         summary_x = legend_x + legend_text_offset * 10.0
         summary_y = legend_y
 
@@ -910,7 +872,7 @@ def write_svg(
             % (summary_x, summary_y)
         )
 
-        # Blank line between Summary header and first block
+        # Inserts a blank line between the summary header and the first block
         summary_y += row_step_px * 1.3
 
         base_world = summary_x / svg_scale
@@ -920,6 +882,7 @@ def write_svg(
         char_width_px = font_size_px * 0.6
         char_width_world = char_width_px / svg_scale
 
+        # Escapes XML special characters for safe rendering
         def escape_text(s):
             return s.replace("&", "&amp;").replace("<", "&lt;")
 
@@ -987,7 +950,7 @@ def write_svg(
 
 
 def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False, rot2_deg=0.0, svg_path=None, log_path=None, quiet=False):
-    """PB: Executes a pairwise comparison and returns the average XY and XYZ APD scores."""
+    """Executes a pairwise comparison and returns the average XY and XYZ APD scores"""
 
     root1 = os.path.splitext(csv1)[0]
     root2 = os.path.splitext(csv2)[0]
@@ -999,7 +962,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
     orig_stdout = sys.stdout
     log_file = open(log_path, "w")
 
-    # PB: Defines a custom output stream class to simultaneously write output to the console and a log file
+    # Defines a custom output stream class to simultaneously write output to the console and a log file
     class Tee(object):
         def __init__(self, *streams):
             self.streams = streams
@@ -1048,8 +1011,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
 
         pf_indices = sorted({pf for (pf, r) in common_residues})
 
-        # Handedness global flip
-        # PB: Evaluates whether applying a global handedness flip reduces the number of structural mismatches
+        # Evaluates whether applying a global handedness flip reduces the number of structural mismatches
         apply_handed_flip = False
         if allow_handedness_global_flip:
             direct_mismatches = 0
@@ -1088,7 +1050,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             if h1 != h2:
                 handed_diff_all.add(key)
 
-        # Exclude PF-end residues from handedness differences
+        # Excludes protofilament end residues from handedness differences
         ends_to_exclude = set()
         for pf in pf_indices:
             resnums = sorted([r for (p, r) in common_residues if p == pf])
@@ -1122,8 +1084,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
         print("Residues with intra-protofilament contact changes:", len(residues_with_intra_contact_change))
         print("Residues with inter-protofilament contact changes:", len(residues_with_inter_contact_change))
 
-        # Choose global sign flip of Z-offsets (structure 2) to reduce non-zero deltas overall (intra+inter)
-        # PB: Evaluates whether a global sign flip of Z-offsets minimizes non-zero contact deltas
+        # Evaluates whether a global sign flip of Z-offsets minimizes non-zero contact deltas
         apply_zoffset_sign_flip = False
         if allow_zoffset_global_flip:
             count_direct = 0
@@ -1149,7 +1110,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             else:
                 print("Using direct Z-offset comparison (no global sign flip).")
 
-        # Choose best inter shift to minimize different inter Z-offsets
+        # Chooses the best inter-protofilament shift to minimize different inter Z-offsets
         inter_shift = 0
         if allow_inter_zoffset_global_shift:
             inter_shift, best_nonzero, best_total = choose_best_inter_shift(
@@ -1166,7 +1127,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                     ")"
                 )
 
-        # Per-protofilament (intra only) Z-offset residue set
+        # Generates the per-protofilament Z-offset residue set
         residues_with_nonzero_intra_offset = set()
         for key in common_keys:
             if key[4] != "intra":
@@ -1176,15 +1137,15 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                 residues_with_nonzero_intra_offset.add((key[0], key[1]))
                 residues_with_nonzero_intra_offset.add((key[2], key[3]))
 
-        # Per-interface (inter) non-zero Z-offset inter-contact count helper
+        # Helper to identify non-zero Z-offset inter-contacts per interface
         def inter_contact_nonzero_for_key(key):
             b = compute_zoffset_bucket_inter(contacts1.get(key), contacts2.get(key), apply_zoffset_sign_flip, inter_shift)
             return abs(b) >= 1
 
-        # Build Summary lines (indent_level, line, is_bold)
+        # Builds summary lines with indent levels and formatting
         pf_stats_lines = []
 
-        # Protofilament blocks
+        # Calculates and reports statistics for protofilament blocks
         for pf in pf_indices:
             res_pf_common = {(p, r) for (p, r) in common_residues if p == pf}
             y = len(res_pf_common)
@@ -1213,7 +1174,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             frac_intra = 100 * float(g) / float(y)
 
             xy_set = set()
-            # Don't count mutations in the overall distances!
+            # Omits mutations from the overall distance calculations
             #xy_set |= mut_pf
             xy_set |= hand_pf
             xy_set |= intra_pf
@@ -1224,8 +1185,8 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             frac_xy = float(100 * len(xy_set)) / float(y)
             frac_xyz = float(100 * len(xyz_set)) / float(y)
 
-            # Adjusted APD to account for residues ordered in only one structure
-            # Nuniq = max(#unique residues in left, #unique residues in right)
+            # Adjusts APD to account for residues ordered in only one structure
+            # Determines the maximum number of unique residues between the two structures
             nuniq_left = max(0, aa - cc)
             nuniq_right = max(0, bb - cc)
             Nuniq = max(nuniq_left, nuniq_right)
@@ -1234,7 +1195,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
 
             header = "Protofilament %d" % pf
 
-            # Console
+            # Prints output to the console
             print(header)
             print("  - residues in structure 1: %d" % aa)
             print("  - residues in structure 2: %d" % bb)
@@ -1254,7 +1215,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             all_xy_scores.append(adj_frac_xy)
             all_xyz_scores.append(adj_frac_xyz)
 
-            # SVG Summary
+            # Appends output to the SVG summary lines
             pf_stats_lines.append((0, header, True))
             pf_stats_lines.append((1, "- residues in structure 1: %d" % aa, False))
             pf_stats_lines.append((1, "- residues in structure 2: %d" % bb, False))
@@ -1271,15 +1232,14 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
             pf_stats_lines.append((1, "- PF%d Amyloid Packing Difference (XYZ): %.0f%%" % (pf, adj_frac_xyz), True))
             pf_stats_lines.append((0, "", False))
 
-        # Interface blocks
+        # Calculates and reports statistics for interface blocks
         for idx_i in range(len(pf_indices)):
             for idx_j in range(idx_i + 1, len(pf_indices)):
                 pf_i = pf_indices[idx_i]
                 pf_j = pf_indices[idx_j]
 
-                # Residues involved in inter contacts for this interface in left/right.
-                # IMPORTANT: interface membership is defined by STRICT contacts only
-                # (<= 4.5 Å), consistent with the contact classification rules.
+                # Identifies residues involved in inter-protofilament contacts for this interface
+                # Restricts interface membership to strict contacts only to maintain consistency
                 inter_res_left = set()
                 for key, info in contacts1.items():
                     if key[4] != "inter":
@@ -1311,13 +1271,12 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                 inter_res_common = inter_res_left & inter_res_right
                 c = len(inter_res_common)
 
-                # Extra residues for this interface (residues participating in inter-PF contacts
-                # that are present only in one structure)
+                # Calculates the number of extra residues for this interface
                 extra_left = max(0, a - c)
                 extra_right = max(0, b - c)
                 Nextra = max(extra_left, extra_right)
 
-                # d_contact: number of common inter contacts with non-zero Z-offset delta (after best shift)
+                # Counts the number of common inter-protofilament contacts with non-zero Z-offset deltas
                 d_contact = 0
                 zoff_res_inter = set()
                 for key in common_keys:
@@ -1330,12 +1289,11 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                         zoff_res_inter.add((key[0], key[1]))
                         zoff_res_inter.add((key[2], key[3]))
 
-                # e_res: right-left flipped residues involved in inter contacts and present in common interface residue set
+                # Counts right-left flipped residues involved in common inter-protofilament contacts
                 inout_res_inter = handed_diff & inter_res_common
                 e_res = len(inout_res_inter)
 
-                # f_res: number of COMMON interface residues that participate in at least
-                # one UNIQUE inter-PF contact for this interface.
+                # Counts common interface residues participating in unique inter-protofilament contacts
                 uniq_res_inter = set()
                 for key in (unique1_keys | unique2_keys):
                     if key[4] != "inter":
@@ -1369,7 +1327,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                     frac_xy = 100 * float(len(xy_set)) / float(c)
                     frac_xyz = 100 * float(len(xyz_set)) / float(c)
 
-                    # Adjusted APD to account for extra interface residues present in only one structure
+                    # Adjusts APD to account for extra interface residues present in only one structure
                     adj_frac_xy = 100 * float(len(xy_set) + Nextra) / float(c + Nextra)
                     adj_frac_xyz = 100 * float(len(xyz_set) + Nextra) / float(c + Nextra)
 
@@ -1379,7 +1337,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                     xy_line =  "- PF%d-PF%d Amyloid Packing Difference (XY): %.1f%%" % (pf_i, pf_j, adj_frac_xy)
                     xyz_line = "- PF%d-PF%d Amyloid Packing Difference (XYZ): %.1f%%" % (pf_i, pf_j, adj_frac_xyz)
 
-                # Console
+                # Prints output to the console
                 print(header_if)
                 print("  - residues in left:", a)
                 print("  - residues in right:", b)
@@ -1397,7 +1355,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
                 all_xy_scores.append(adj_frac_xy)
                 all_xyz_scores.append(adj_frac_xyz)
 
-                # SVG Summary
+                # Appends output to the SVG summary lines
                 pf_stats_lines.append((0, header_if, True))
                 pf_stats_lines.append((1, "- residues in left: %d" % a, False))
                 pf_stats_lines.append((1, "- residues in right: %d" % b, False))
@@ -1448,7 +1406,7 @@ def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False
 
 
 def main():
-    """PB: Parses CLI arguments to execute compare as a standalone script."""
+    """Parses CLI arguments to execute the comparison as a standalone script"""
     if len(sys.argv) < 3:
         print(
             "Usage: python compare.py <contacts1.csv> <contacts2.csv> "
@@ -1472,6 +1430,7 @@ def main():
     rot2_deg = 0.0
     offset2 = 0
 
+    # Parses command-line arguments to configure input files and spatial transformations
     i = 3
     while i < len(sys.argv):
         arg = sys.argv[i]
