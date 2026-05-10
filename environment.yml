@@ -75,5 +75,3 @@ dependencies:
   - pip:
     - biopython==1.87
     - numpy==2.4.4
-
-prefix: "/Users/parker/miniforge3/envs/apd"
