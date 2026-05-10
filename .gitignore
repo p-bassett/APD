@@ -1,8 +1,5 @@
-# MacOS system files
-*.DS_Store
-
 # User input structures
-PDBs
+PDBs/*
 
 # Analysis results
 Comparisons

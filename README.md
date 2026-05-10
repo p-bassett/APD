@@ -59,8 +59,6 @@ python batch-apd.py --rotate_all <degrees> --flip_all
 
 The `compare.py` script has been modified to generate residue numbering to mark specific residue positions.
 
-The `compare.py` script has been modified to generate residue numbering to mark specific residue positions.
-
 ## References
 Scheres, S. H. W. The amyloid packing difference: a pairwise comparison metric for amyloid structures. _bioRxiv_ 2026.02.18.706523 Preprint at https://doi.org/10.64898/2026.02.18.706523 (2026).
 
