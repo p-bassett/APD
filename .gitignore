@@ -1,5 +1,6 @@
 # User input structures
 PDBs/*
+!PDBs/.gitkeep
 
 # Analysis results
 Comparisons
