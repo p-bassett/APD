@@ -12,6 +12,7 @@ import itertools
 import csv
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import argparse
 import math
 import numpy as np
 
@@ -132,6 +133,12 @@ def process_pair(pair, logs_dir, pairwise_figs_dir, orientations):
 
 def main():
     """Executes the full batch APD workflow"""
+    # Parses command-line arguments to configure batch processing and global visual modifiers
+    parser = argparse.ArgumentParser(description="Batch processes APD comparisons for all structures in a directory.")
+    parser.add_argument("--rotate_all", type=float, default=0.0, help="Global rotation (in degrees) to apply to all structures after PCA alignment")
+    parser.add_argument("--flip_all", action="store_true", help="Globally flips all structures horizontally after PCA alignment")
+    args = parser.parse_args()
+
     # Sets up base directories and paths for inputs and outputs
     input_dir = base_dir / "PDBs"
     contacts_dir = base_dir / "Contacts"
@@ -203,6 +210,13 @@ def main():
     orientations = {}
     for csv_file in csv_files:
         angle, flip = calculate_principal_orientation(csv_file)
+        
+        # Applies global user overrides to the calculated orientation
+        if args.flip_all:
+            flip = not flip
+            angle = -angle
+        angle = (angle + args.rotate_all) % 360.0
+        
         orientations[csv_file] = (angle, flip)
         print(f"  -> {csv_file.stem}: Rotated {angle:.1f}°, Flipped {flip}")
 
