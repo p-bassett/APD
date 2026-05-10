@@ -12,6 +12,8 @@ import itertools
 import csv
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import math
+import numpy as np
 
 # Dynamically appends the APD script directory to the system path across all OS process spawn methods
 base_dir = Path.cwd()
@@ -21,7 +23,90 @@ if apd_dir.exists() and (apd_dir / "compare.py").exists():
 else:
     sys.path.insert(0, str(base_dir))
 
-def process_pair(pair, logs_dir, pairwise_figs_dir):
+def calculate_principal_orientation(csv_path):
+    """Calculates the absolute rotation angle and flip state using PCA to standardize structure orientation"""
+    coords = []
+    resnums = []
+    
+    with open(csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Only uses the primary protofilament (pf 0) to calculate absolute orientation
+            if row.get("pf", "").strip() != "0":
+                continue
+                
+            ca_x, ca_y = row.get("ca_x", "NA"), row.get("ca_y", "NA")
+            resnum = row.get("residue", "NA")
+            
+            # Only uses valid CA coordinates to calculate the mass
+            if ca_x != "NA" and ca_y != "NA" and resnum != "NA":
+                x, y = float(ca_x), float(ca_y)
+                coords.append([x, y])
+                resnums.append((int(resnum), x, y))
+                
+    if len(coords) < 2:
+        return 0.0, False
+        
+    # Determines the 2D chirality (winding direction) using the signed area of the CA trace
+    resnums.sort(key=lambda x: x[0])
+    signed_area = 0.0
+    cx = sum(r[1] for r in resnums) / len(resnums)
+    cy = sum(r[2] for r in resnums) / len(resnums)
+    
+    for i in range(len(resnums) - 1):
+        x1, y1 = resnums[i][1] - cx, resnums[i][2] - cy
+        x2, y2 = resnums[i+1][1] - cx, resnums[i+1][2] - cy
+        signed_area += (x1 * y2 - x2 * y1)
+        
+    flip = bool(signed_area < 0)
+    
+    # Applies the flip to the working coordinates before computing PCA
+    working_coords = []
+    working_resnums = []
+    for rnum, x, y in resnums:
+        wx = -x if flip else x
+        working_coords.append([wx, y])
+        working_resnums.append((rnum, wx, y))
+        
+    working_coords = np.array(working_coords)
+    mean_coord = np.mean(working_coords, axis=0)
+    centered = working_coords - mean_coord
+    
+    # Computes covariance matrix and performs eigen decomposition
+    cov = np.cov(centered, rowvar=False)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+    
+    # Identifies the primary eigenvector (longest axis of the cross-section)
+    primary_eigenvector = eigenvectors[:, np.argmax(eigenvalues)]
+    
+    # Calculates the angle required to rotate the longest axis to the vertical Y-axis (pi/2)
+    angle_rad = math.atan2(primary_eigenvector[1], primary_eigenvector[0])
+    rotation_rad = (math.pi / 2.0) - angle_rad
+    
+    # Resolves the 180-degree ambiguity using the N-to-C terminal vector
+    mid_idx = len(working_resnums) // 2
+    
+    if mid_idx > 0:
+        n_half = np.array([[r[1], r[2]] for r in working_resnums[:mid_idx]])
+        c_half = np.array([[r[1], r[2]] for r in working_resnums[mid_idx:]])
+        
+        n_com = np.mean(n_half, axis=0)
+        c_com = np.mean(c_half, axis=0)
+        n_to_c = c_com - n_com
+        
+        # Applies the calculated rotation to the N-to-C vector
+        cos_r = math.cos(rotation_rad)
+        sin_r = math.sin(rotation_rad)
+        rot_ny = sin_r * n_to_c[0] + cos_r * n_to_c[1]
+        
+        # Ensures the N-to-C vector consistently points upwards
+        if rot_ny < 0:
+            rotation_rad += math.pi
+            
+    # Normalizes the angle to [0, 360) and returns it in degrees
+    return math.degrees(rotation_rad) % 360.0, flip
+
+def process_pair(pair, logs_dir, pairwise_figs_dir, orientations):
     """Executes a single pairwise comparison natively returning the APD scores"""
     file1, file2 = pair
     base1 = file1.stem.replace("_contacts", "")
@@ -30,9 +115,17 @@ def process_pair(pair, logs_dir, pairwise_figs_dir):
     log_path = logs_dir / f"{base1}_vs_{base2}.log"
     svg_path = pairwise_figs_dir / f"{base1}_vs_{base2}.svg"
     
+    rot1, flip1 = orientations.get(file1, (0.0, False))
+    rot2, flip2 = orientations.get(file2, (0.0, False))
+    
     try:
         import compare
-        avg_xy, avg_xyz = compare.run_comparison(str(file1), str(file2), svg_path=str(svg_path), log_path=str(log_path), quiet=True)
+        avg_xy, avg_xyz = compare.run_comparison(
+            str(file1), str(file2), 
+            flip1=flip1, rot1_deg=rot1, 
+            flip2=flip2, rot2_deg=rot2, 
+            svg_path=str(svg_path), log_path=str(log_path), quiet=True
+        )
         return base1, base2, True, avg_xy, avg_xyz
     except Exception as e:
         return base1, base2, False, 100.0, 100.0
@@ -105,6 +198,14 @@ def main():
     pairs = list(itertools.combinations(csv_files, 2))
     print(f"  -> Found {len(csv_files)} structure CSVs; generating {len(pairs)} pairwise comparisons")
 
+    # Calculates standardized visual orientations for all structures
+    print("\nCalculating standardized PCA orientations for all structures...\n")
+    orientations = {}
+    for csv_file in csv_files:
+        angle, flip = calculate_principal_orientation(csv_file)
+        orientations[csv_file] = (angle, flip)
+        print(f"  -> {csv_file.stem}: Rotated {angle:.1f}°, Flipped {flip}")
+
     log_files = []
     # Determines the number of available CPU cores to allocate for parallel processing
     cpu_cores = os.cpu_count() or 4
@@ -114,7 +215,7 @@ def main():
     # Distributes pairwise comparisons across the process pool
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(process_pair, pair, logs_dir, pairwise_figs_dir): pair 
+            executor.submit(process_pair, pair, logs_dir, pairwise_figs_dir, orientations): pair 
             for pair in pairs
         }
         
