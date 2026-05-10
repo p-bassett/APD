@@ -22,7 +22,7 @@ Necessary dependencies are **Biopython, Matplotlib, SciPy,** and **Seaborn**. Th
 pip install biopython matplotlib scipy seaborn
 
 # Install using conda
-conda env create -f environments.yml
+conda env create -f environment.yml
 ```
 
 ## Running the scripts
