@@ -119,7 +119,7 @@ def extract_contacts(infile, csv_file=None, bild_file=None, quiet=False):
         raise FileNotFoundError(f"Error: file not found: {infile}")
 
     if csv_file is None or bild_file is None:
-        root = os.path.splitext(infile)[0]
+        root = os.path.splitext(os.path.basename(infile))[0]
         if csv_file is None:
             csv_file = root + "_contacts.csv"
         if bild_file is None:

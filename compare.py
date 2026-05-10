@@ -1037,8 +1037,8 @@ def write_svg(
 def run_comparison(csv1, csv2, offset2=0, flip1=False, rot1_deg=0.0, flip2=False, rot2_deg=0.0, svg_path=None, log_path=None, quiet=False):
     """Executes a pairwise comparison and returns the average XY and XYZ APD scores"""
 
-    root1 = os.path.splitext(csv1)[0]
-    root2 = os.path.splitext(csv2)[0]
+    root1 = os.path.splitext(os.path.basename(csv1))[0]
+    root2 = os.path.splitext(os.path.basename(csv2))[0]
     if svg_path is None:
         svg_path = "%s_vs_%s.svg" % (root1, root2)
     if log_path is None:
