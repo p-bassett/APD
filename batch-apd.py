@@ -21,14 +21,14 @@ if apd_dir.exists() and (apd_dir / "compare.py").exists():
 else:
     sys.path.insert(0, str(base_dir))
 
-def process_pair(pair, logs_dir, figs_dir):
+def process_pair(pair, logs_dir, pairwise_figs_dir):
     """Executes a single pairwise comparison natively returning the APD scores"""
     file1, file2 = pair
     base1 = file1.stem.replace("_contacts", "")
     base2 = file2.stem.replace("_contacts", "")
     
     log_path = logs_dir / f"{base1}_vs_{base2}.log"
-    svg_path = figs_dir / f"{base1}_vs_{base2}.svg"
+    svg_path = pairwise_figs_dir / f"{base1}_vs_{base2}.svg"
     
     try:
         import compare
@@ -44,7 +44,7 @@ def main():
     contacts_dir = base_dir / "Contacts"
     comparisons_dir = base_dir / "Comparisons"
     logs_dir = comparisons_dir / "Logs"
-    figs_dir = comparisons_dir / "Figures"
+    pairwise_figs_dir = comparisons_dir / "Pairwise_Figures"
     
     try:
         import compare
@@ -57,7 +57,7 @@ def main():
     contacts_dir.mkdir(parents=True, exist_ok=True)
     comparisons_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
-    figs_dir.mkdir(parents=True, exist_ok=True)
+    pairwise_figs_dir.mkdir(parents=True, exist_ok=True)
 
     # Extracts contacts from all structure files
     print("\nExtracting contacts of all structures in PDBs/...\n")
@@ -114,7 +114,7 @@ def main():
     # Distributes pairwise comparisons across the process pool
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(process_pair, pair, logs_dir, figs_dir): pair 
+            executor.submit(process_pair, pair, logs_dir, pairwise_figs_dir): pair 
             for pair in pairs
         }
         

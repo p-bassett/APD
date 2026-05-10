@@ -694,6 +694,32 @@ def write_svg(
 
         def draw_residues(residues, circ_svg, residue_keys, unique_residue_set):
             """Draws residue circles colored by mutation or handedness changes and adds their text labels"""
+            # Identifies residues to label (termini and multiples of 10)
+            # Maps key to list of adjacent keys to compute outward vectors
+            # Skips numbering for entirely extra protofilaments to avoid visual clutter
+            common_pfs = {pf for pf, res in common_residues}
+            label_info = {}
+            pf_to_resnums = defaultdict(list)
+            for pf, resnum in residue_keys:
+                if pf in common_pfs:
+                    pf_to_resnums[pf].append(resnum)
+            for pf, rnums in pf_to_resnums.items():
+                rnums = sorted(rnums)
+                n = len(rnums)
+                for i, resnum in enumerate(rnums):
+                    is_term = (i == 0 or i == n - 1)
+                    is_mult10 = (resnum % 10 == 0)
+                    if is_term or is_mult10:
+                        adj = []
+                        if is_term:
+                            if i == 0 and n > 1: adj.append((pf, rnums[1]))
+                            elif i == n - 1 and n > 1: adj.append((pf, rnums[-2]))
+                        else:
+                            # It's a middle residue multiple of 10
+                            if i > 0: adj.append((pf, rnums[i-1]))
+                            if i < n - 1: adj.append((pf, rnums[i+1]))
+                        label_info[(pf, resnum)] = adj
+
             for keyr in sorted(residue_keys):
                 if keyr not in circ_svg:
                     continue
@@ -751,6 +777,65 @@ def write_svg(
                     'font-size="17.6" text-anchor="middle">%s</text>\n'
                     % (x, label_y, text_color, letter)
                 )
+
+                # Draws residue number if it's a terminus or multiple of 10
+                if keyr in label_info:
+                    adj_keys = label_info[keyr]
+                    ux, uy = 0.707, -0.707  # Default to top-right
+                    if adj_keys:
+                        valid_adjs = [ak for ak in adj_keys if ak in circ_svg]
+                        if valid_adjs:
+                            ax = sum(circ_svg[ak][0] for ak in valid_adjs) / len(valid_adjs)
+                            ay = sum(circ_svg[ak][1] for ak in valid_adjs) / len(valid_adjs)
+                            
+                            dx = x - ax
+                            dy = y - ay
+                            length = math.sqrt(dx*dx + dy*dy)
+                            
+                            # If length is sufficient, pushes outward from the center of neighbors
+                            if length > 1e-2:
+                                ux = dx / length
+                                uy = dy / length
+                            # Fallback for a straight backbone (angle ~180): rotates sequence vector 90 degrees
+                            elif len(valid_adjs) == 2:
+                                px, py = circ_svg[valid_adjs[0]]
+                                nx, ny = circ_svg[valid_adjs[1]]
+                                vx = nx - px
+                                vy = ny - py
+                                vl = math.sqrt(vx*vx + vy*vy)
+                                if vl > 1e-5:
+                                    ux = -vy / vl
+                                    uy = vx / vl
+
+                    # Pushes outward from the circle
+                    push_dist = circle_r_px * 1.5
+                    term_x = x + ux * push_dist
+                    term_y = y + uy * push_dist
+
+                    # Fine-tunes anchor and alignment to prevent overlapping the offset point
+                    if ux > 0.1:
+                        anchor = "start"
+                        term_x += circle_r_px * 0.2
+                    elif ux < -0.1:
+                        anchor = "end"
+                        term_x -= circle_r_px * 0.2
+                    else:
+                        anchor = "middle"
+
+                    if uy > 0.1:
+                        term_y += circle_r_px * 0.8
+                    elif uy < -0.1:
+                        term_y -= circle_r_px * 0.2
+                    else:
+                        term_y += circle_r_px * 0.3
+
+                    resnum = keyr[1]
+                    f.write(
+                        '  <text x="%.1f" y="%.1f" '
+                        'fill="#555555" font-family="sans-serif" '
+                        'font-size="16" text-anchor="%s">%d</text>\n'
+                        % (term_x, term_y, anchor, resnum)
+                    )
 
         # Groups and renders components for the first structure
         f.write('<g id="structure1">\n')
